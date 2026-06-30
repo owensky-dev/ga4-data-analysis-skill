@@ -1,0 +1,6 @@
+interface:
+  display_name: "GA4 数据分析"
+  short_description: "生成 GA4 周增长诊断和老板版图表报告"
+  default_prompt: "Use $ga4-data-analysis to generate a Chinese GA4 weekly boss report with charts."
+policy:
+  allow_implicit_invocation: true
