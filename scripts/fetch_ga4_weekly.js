@@ -20,13 +20,7 @@ const propertyId = args["property-id"];
 const keyFile = args["key-file"];
 const outPath = args.out || "ga4_weekly_diagnosis_latest.json";
 const propertyTimeZone = args.timezone || "America/Juneau";
-
-if (!propertyId || !keyFile) {
-  console.error("Usage: fetch_ga4_weekly.js --property-id <id> --key-file <service-account.json> --out <output.json>");
-  process.exit(2);
-}
-
-const key = JSON.parse(fs.readFileSync(keyFile, "utf8"));
+let key;
 
 function b64url(input) {
   return Buffer.from(input).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
@@ -208,8 +202,8 @@ function requestDefs(dateRanges) {
     build("landing_channel_current", "current", [{ name: "sessionDefaultChannelGroup" }, { name: "landingPagePlusQueryString" }], landing, { orderBys: [{ metric: { metricName: "sessions" }, desc: true }], limit: 120 }),
     build("device_current", "current", [{ name: "deviceCategory" }], efficiency, { orderBys: [{ metric: { metricName: "sessions" }, desc: true }], limit: 10 }),
     build("device_previous", "previous", [{ name: "deviceCategory" }], efficiency, { orderBys: [{ metric: { metricName: "sessions" }, desc: true }], limit: 10 }),
-    build("event_device_current", "current", [{ name: "deviceCategory" }, { name: "eventName" }], eventCount, { dimensionFilter: eventFilter, orderBys: [{ metric: { metricName: "eventCount" }, desc: true }], limit: 80 }),
-    build("event_device_previous", "previous", [{ name: "deviceCategory" }, { name: "eventName" }], eventCount, { dimensionFilter: eventFilter, orderBys: [{ metric: { metricName: "eventCount" }, desc: true }], limit: 80 }),
+    build("event_device_current", "current", [{ name: "date" }, { name: "deviceCategory" }, { name: "eventName" }], eventCount, { dimensionFilter: eventFilter, orderBys: [{ dimension: { dimensionName: "date" } }], limit: 200 }),
+    build("event_device_previous", "previous", [{ name: "date" }, { name: "deviceCategory" }, { name: "eventName" }], eventCount, { dimensionFilter: eventFilter, orderBys: [{ dimension: { dimensionName: "date" } }], limit: 200 }),
     build("items_current", "current", [{ name: "itemName" }], item, { orderBys: [{ metric: { metricName: "itemsViewed" }, desc: true }], limit: 120 }),
     build("items_previous", "previous", [{ name: "itemName" }], item, { orderBys: [{ metric: { metricName: "itemsViewed" }, desc: true }], limit: 120 }),
     build("pages_current", "current", [{ name: "pagePath" }, { name: "pageTitle" }], landing, { orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }], limit: 100 }),
@@ -218,6 +212,11 @@ function requestDefs(dateRanges) {
 }
 
 async function main() {
+  if (!propertyId || !keyFile) {
+    console.error("Usage: fetch_ga4_weekly.js --property-id <id> --key-file <service-account.json> --out <output.json>");
+    process.exit(2);
+  }
+  key = JSON.parse(fs.readFileSync(keyFile, "utf8"));
   const accessToken = await getAccessToken();
   const dateRanges = getDateRanges();
   const results = {};
@@ -244,7 +243,11 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { requestDefs };

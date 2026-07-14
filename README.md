@@ -10,6 +10,7 @@ This Codex skill turns Google Analytics 4 Data API access into a weekly ecommerc
 - 渠道归因异常排查，例如 `Direct` 异常、`Unassigned`、`(not set)`、UTM 命名混乱。
 - Google Ads / Shopping / Search 落地页表现复盘。
 - Mobile vs desktop 漏斗诊断，覆盖 `view_item`、`add_to_cart`、`begin_checkout`、`purchase`。
+- 漏斗事件保留 `date × deviceCategory × eventName` 粒度，周报展示周汇总，JSON 可继续审计每日加购和结账变化。
 - 商品漏斗分析，覆盖 `itemName`、`itemsViewed`、`itemsAddedToCart`、`itemsPurchased`、`itemRevenue`。
 - SEO、内容页、Referral、AI 来源机会分析。
 
