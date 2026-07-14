@@ -1,5 +1,7 @@
 # GA4 数据分析 / GA4 Data Analysis
 
+[![CI](https://github.com/owensky-dev/ga4-data-analysis-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/owensky-dev/ga4-data-analysis-skill/actions/workflows/ci.yml)
+
 面向独立站、DTC 品牌和电商增长复盘的 Codex skill。它会读取 Google Analytics Data API 数据，默认使用「最近完整 7 天 vs 再往前 7 天」的周期，生成中文 GA4 周增长诊断，并输出适合老板汇报的 HTML 报告、静态 PNG 图表、Markdown 备份和可审计 JSON 快照。
 
 This Codex skill turns Google Analytics 4 Data API access into a weekly ecommerce growth diagnosis. It compares the latest complete 7 days with the previous 7 days and produces a Chinese executive HTML report with static PNG charts, a Markdown backup, and auditable JSON outputs.
