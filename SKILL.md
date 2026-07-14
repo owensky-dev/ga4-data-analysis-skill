@@ -21,6 +21,8 @@ Prefer this skill when the user asks for GA4 周报、GA4 增长诊断、独立�
    - Time window, default latest complete 7 days in the GA4 property timezone vs the previous 7 days.
 2. Read automation or project memory if the request is recurring or references a previous report. Preserve the last accepted report format unless the user asks to change it.
 3. Fetch GA4 data with `scripts/fetch_ga4_weekly.js`.
+   - Keep Sessions/channel queries separate from ecommerce event queries.
+   - Fetch `view_item`, `add_to_cart`, `begin_checkout`, and `purchase` with `date`, `deviceCategory`, and `eventName`, then aggregate the dated rows only when rendering the weekly device funnel.
 4. Build the executive report with `scripts/build_boss_report.py`.
 5. Validate:
    - No failed GA4 queries unless explicitly documented.
@@ -38,6 +40,7 @@ Cover these sections unless the data is unavailable:
 - Channel efficiency by channel, source/medium, and campaign: sessions, engagement rate, conversions, revenue, revenue per session.
 - Paid landing pages: high-traffic or low-conversion paid pages with zero revenue.
 - Mobile vs desktop funnel: `view_item`, `add_to_cart`, `begin_checkout`, `purchase`; call out mobile CRO issues.
+- Preserve the date dimension for every mobile/desktop funnel event row so daily add-to-cart and checkout changes remain auditable in the raw JSON snapshot.
 - Item funnel and tracking health: `itemName`, `itemsViewed`, `itemsAddedToCart`, `itemsPurchased`, `itemRevenue`; call out dirty item names and high-view low-ATC products.
 - SEO, content-page, referral, and AI-source opportunities, especially `google / organic`, `bing / organic`, `chatgpt`, `perplexity`, `reddit`, `youtube`, and `pinterest`.
 - Three to five priority actions ranked by impact and feasibility.

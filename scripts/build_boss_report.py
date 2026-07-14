@@ -126,6 +126,16 @@ def summary(data, key):
     return values[0] if values else {}
 
 
+def aggregate_device_funnel(data, key):
+    funnel = {"mobile": {}, "desktop": {}}
+    for row in rows(data, key):
+        device = row.get("deviceCategory")
+        event_name = row.get("eventName")
+        if device in funnel and event_name:
+            funnel[device][event_name] = funnel[device].get(event_name, 0) + row.get("eventCount", 0)
+    return funnel
+
+
 def rel(path, out_dir):
     return path.relative_to(out_dir).as_posix()
 
@@ -247,10 +257,7 @@ def draw_device(data, path):
     img = canvas(1500, 760)
     draw = ImageDraw.Draw(img)
     header(draw, "移动端与桌面端商品漏斗", "如果 mobile 有 begin_checkout 但没有 purchase，优先排查移动端结账后段。", img.width)
-    funnel = {"mobile": {}, "desktop": {}}
-    for row in rows(data, "event_device_current"):
-        if row.get("deviceCategory") in funnel:
-            funnel[row["deviceCategory"]][row.get("eventName")] = row.get("eventCount", 0)
+    funnel = aggregate_device_funnel(data, "event_device_current")
     stages = [("view_item", "View item"), ("add_to_cart", "Add to cart"), ("begin_checkout", "Begin checkout"), ("purchase", "Purchase")]
     max_v = max(funnel["mobile"].get("view_item", 0), funnel["desktop"].get("view_item", 0), 1)
     for idx, device in enumerate(["mobile", "desktop"]):
