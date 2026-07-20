@@ -27,6 +27,19 @@ Use this reference when the report must match the boss-ready weekly format.
 - Do not add `eventName` to Sessions, channel, campaign, or landing-page queries because it changes their aggregation grain.
 - Keep dated event rows in the audit JSON. Sum them by device and event only when rendering the weekly funnel.
 
+## Key-event and purchase reconciliation contract
+
+- Request `keyEvents` in new Data API reports. Do not request `keyEvents` and the legacy `conversions` alias together; GA4 rejects them as duplicate metrics.
+- Preserve a derived `conversions = keyEvents` value in normalized rows only when an older report renderer still depends on that field.
+- Add `key_events_current` and `key_events_previous` with dimensions `eventName`, `isKeyEvent` and metrics `eventCount`, `keyEvents`, `eventValue`, `totalRevenue`, `purchaseRevenue`, `ecommercePurchases`, `transactions`.
+- Add `purchase_transactions_current` and `purchase_transactions_previous` filtered to `eventName = purchase`, with dimensions `date`, `transactionId`, `deviceCategory`, `sessionDefaultChannelGroup`, `sessionSourceMedium`.
+- List the property's configured key events through the GA4 Admin API when the service account has access. A configured non-purchase key event must be labelled as a micro-conversion, not an order.
+- Interpret `eventValue` as event parameter value, not revenue. Add-to-cart and checkout events can have event value while revenue remains zero.
+- Check that purchase `eventCount`, `keyEvents`, `ecommercePurchases`, `transactions`, and unique non-empty `transactionId` counts agree.
+- Check that purchase `purchaseRevenue`, purchase `totalRevenue`, and the sum of transaction-detail `purchaseRevenue` agree within currency rounding tolerance.
+- Compare aggregate `itemRevenue` separately. Explain legitimate differences from purchase revenue through tax, shipping, and refunds before declaring a tracking fault.
+- Do not promise an exact `transactionId x itemName` join from the Core Data API. Require GA4 BigQuery Export when order-to-SKU mapping is needed.
+
 ## Executive report rules
 
 - Open with `Executive Summary`.
@@ -34,4 +47,5 @@ Use this reference when the report must match the boss-ready weekly format.
 - Every chart needs adjacent interpretation in Chinese.
 - Include exact date ranges and comparison baseline.
 - Preserve caveats that change interpretation.
+- Replace generic "needs eventName follow-up" caveats with the actual key-event and transaction reconciliation result whenever those datasets are available.
 - End with 3-5 prioritized actions.

@@ -13,6 +13,8 @@ This Codex skill turns Google Analytics 4 Data API access into a weekly ecommerc
 - Google Ads / Shopping / Search 落地页表现复盘。
 - Mobile vs desktop 漏斗诊断，覆盖 `view_item`、`add_to_cart`、`begin_checkout`、`purchase`。
 - 漏斗事件保留 `date × deviceCategory × eventName` 粒度，周报展示周汇总，JSON 可继续审计每日加购和结账变化。
+- Key event 贡献拆解：使用 `eventName × keyEvents × purchaseRevenue` 区分订单与非收入微转化，并读取当前配置的 key events。
+- Purchase 完整性核验：按 `transactionId`、设备、渠道、source/medium 对账 `ecommercePurchases`、`transactions`、`purchaseRevenue`、`totalRevenue` 和聚合 `itemRevenue`。
 - 商品漏斗分析，覆盖 `itemName`、`itemsViewed`、`itemsAddedToCart`、`itemsPurchased`、`itemRevenue`。
 - SEO、内容页、Referral、AI 来源机会分析。
 
@@ -33,6 +35,8 @@ Use $ga4-data-analysis to generate a Chinese GA4 weekly boss report with charts.
 ```
 
 The skill expects a GA4 property ID and a Google Analytics Data API service-account JSON key path. Do not commit private service-account keys or GA4 customer exports to this repository.
+
+The fetcher requests `keyEvents` and exposes `conversions` only as a backward-compatible normalized field. It never requests both aliases in one GA4 Data API report. Exact transaction-to-item joins require GA4 BigQuery Export because the Core Data API does not provide a stable `transactionId × itemName` contract.
 
 ## Scripts
 
