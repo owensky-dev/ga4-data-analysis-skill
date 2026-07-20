@@ -131,10 +131,48 @@ function mapRows(report, dimensions, metrics) {
     metrics.forEach((m, idx) => {
       out[m.name] = metricValue(row.metricValues?.[idx]?.value);
     });
+    if ("keyEvents" in out && !("conversions" in out)) out.conversions = out.keyEvents;
     if ("sessions" in out && "conversions" in out) out.sessionConversionRateCalc = out.sessions ? out.conversions / out.sessions : 0;
     if ("sessions" in out && "totalRevenue" in out) out.revenuePerSession = out.sessions ? out.totalRevenue / out.sessions : 0;
     return out;
   });
+}
+
+async function listConfiguredKeyEvents(accessToken) {
+  let pageToken = "";
+  const rows = [];
+  try {
+    do {
+      const query = new URLSearchParams({ pageSize: "200" });
+      if (pageToken) query.set("pageToken", pageToken);
+      const resp = await request(
+        "GET",
+        `https://analyticsadmin.googleapis.com/v1beta/properties/${propertyId}/keyEvents?${query}`,
+        { Authorization: `Bearer ${accessToken}` }
+      );
+      const json = JSON.parse(resp.body || "{}");
+      if (resp.status < 200 || resp.status >= 300) {
+        return { name: "configured_key_events", ok: false, status: resp.status, error: json.error || json, rows: [] };
+      }
+      for (const event of json.keyEvents || []) {
+        rows.push({
+          eventName: event.eventName || "(not set)",
+          countingMethod: event.countingMethod || "COUNTING_METHOD_UNSPECIFIED",
+          defaultValue: event.defaultValue?.numericValue ?? null,
+        });
+      }
+      pageToken = json.nextPageToken || "";
+    } while (pageToken);
+    return { name: "configured_key_events", ok: true, status: 200, rowCount: rows.length, rows };
+  } catch (error) {
+    return {
+      name: "configured_key_events",
+      ok: false,
+      status: 0,
+      error: { message: error?.message || "Unknown Admin API request error" },
+      rows: [],
+    };
+  }
 }
 
 async function runReport(accessToken, name, body) {
@@ -166,13 +204,18 @@ function summarize(result, dimensions, metrics) {
 }
 
 function requestDefs(dateRanges) {
-  const metrics10 = ["activeUsers", "newUsers", "sessions", "screenPageViews", "engagedSessions", "engagementRate", "averageSessionDuration", "eventCount", "conversions", "totalRevenue"].map((name) => ({ name }));
-  const efficiency = ["sessions", "engagementRate", "conversions", "totalRevenue"].map((name) => ({ name }));
-  const landing = ["sessions", "engagementRate", "conversions", "totalRevenue", "screenPageViews"].map((name) => ({ name }));
+  const metrics10 = ["activeUsers", "newUsers", "sessions", "screenPageViews", "engagedSessions", "engagementRate", "averageSessionDuration", "eventCount", "keyEvents", "totalRevenue"].map((name) => ({ name }));
+  const efficiency = ["sessions", "engagementRate", "keyEvents", "totalRevenue"].map((name) => ({ name }));
+  const landing = ["sessions", "engagementRate", "keyEvents", "totalRevenue", "screenPageViews"].map((name) => ({ name }));
   const item = ["itemsViewed", "itemsAddedToCart", "itemsPurchased", "itemRevenue"].map((name) => ({ name }));
   const eventCount = [{ name: "eventCount" }];
+  const keyEventMetrics = ["eventCount", "keyEvents", "eventValue", "totalRevenue", "purchaseRevenue", "ecommercePurchases", "transactions"].map((name) => ({ name }));
+  const purchaseMetrics = ["eventCount", "keyEvents", "ecommercePurchases", "transactions", "itemsPurchased", "purchaseRevenue", "totalRevenue"].map((name) => ({ name }));
   const eventFilter = {
     filter: { fieldName: "eventName", inListFilter: { values: ["view_item", "add_to_cart", "begin_checkout", "purchase"] } },
+  };
+  const purchaseFilter = {
+    filter: { fieldName: "eventName", stringFilter: { matchType: "EXACT", value: "purchase" } },
   };
   const aiFilter = {
     orGroup: {
@@ -204,6 +247,10 @@ function requestDefs(dateRanges) {
     build("device_previous", "previous", [{ name: "deviceCategory" }], efficiency, { orderBys: [{ metric: { metricName: "sessions" }, desc: true }], limit: 10 }),
     build("event_device_current", "current", [{ name: "date" }, { name: "deviceCategory" }, { name: "eventName" }], eventCount, { dimensionFilter: eventFilter, orderBys: [{ dimension: { dimensionName: "date" } }], limit: 200 }),
     build("event_device_previous", "previous", [{ name: "date" }, { name: "deviceCategory" }, { name: "eventName" }], eventCount, { dimensionFilter: eventFilter, orderBys: [{ dimension: { dimensionName: "date" } }], limit: 200 }),
+    build("key_events_current", "current", [{ name: "eventName" }, { name: "isKeyEvent" }], keyEventMetrics, { orderBys: [{ metric: { metricName: "keyEvents" }, desc: true }, { metric: { metricName: "eventCount" }, desc: true }], limit: 200 }),
+    build("key_events_previous", "previous", [{ name: "eventName" }, { name: "isKeyEvent" }], keyEventMetrics, { orderBys: [{ metric: { metricName: "keyEvents" }, desc: true }, { metric: { metricName: "eventCount" }, desc: true }], limit: 200 }),
+    build("purchase_transactions_current", "current", [{ name: "date" }, { name: "transactionId" }, { name: "deviceCategory" }, { name: "sessionDefaultChannelGroup" }, { name: "sessionSourceMedium" }], purchaseMetrics, { dimensionFilter: purchaseFilter, orderBys: [{ dimension: { dimensionName: "date" } }], limit: 200 }),
+    build("purchase_transactions_previous", "previous", [{ name: "date" }, { name: "transactionId" }, { name: "deviceCategory" }, { name: "sessionDefaultChannelGroup" }, { name: "sessionSourceMedium" }], purchaseMetrics, { dimensionFilter: purchaseFilter, orderBys: [{ dimension: { dimensionName: "date" } }], limit: 200 }),
     build("items_current", "current", [{ name: "itemName" }], item, { orderBys: [{ metric: { metricName: "itemsViewed" }, desc: true }], limit: 120 }),
     build("items_previous", "previous", [{ name: "itemName" }], item, { orderBys: [{ metric: { metricName: "itemsViewed" }, desc: true }], limit: 120 }),
     build("pages_current", "current", [{ name: "pagePath" }, { name: "pageTitle" }], landing, { orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }], limit: 100 }),
@@ -225,6 +272,7 @@ async function main() {
     results[name] = summarize(result, dimensions, metrics);
     await sleep(150);
   }
+  results.configured_key_events = await listConfiguredKeyEvents(accessToken);
   const output = {
     propertyId,
     serviceAccount: key.client_email,
@@ -250,4 +298,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { requestDefs };
+module.exports = { mapRows, requestDefs };

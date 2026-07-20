@@ -136,6 +136,67 @@ def aggregate_device_funnel(data, key):
     return funnel
 
 
+def key_events_value(row):
+    return row.get("keyEvents", row.get("conversions", 0))
+
+
+def build_key_event_reconciliation(data):
+    current_rows = [row for row in rows(data, "key_events_current") if key_events_value(row) > 0]
+    previous_rows = [row for row in rows(data, "key_events_previous") if key_events_value(row) > 0]
+    transactions = rows(data, "purchase_transactions_current")
+    configured = rows(data, "configured_key_events")
+    purchase_rows = [row for row in current_rows if row.get("eventName") == "purchase"]
+    purchase = {
+        metric: sum(row.get(metric, 0) for row in purchase_rows)
+        for metric in [
+            "eventCount",
+            "keyEvents",
+            "ecommercePurchases",
+            "transactions",
+            "purchaseRevenue",
+            "totalRevenue",
+        ]
+    }
+    transaction_revenue = sum(row.get("purchaseRevenue", 0) for row in transactions)
+    item_revenue = sum(row.get("itemRevenue", 0) for row in rows(data, "items_current"))
+    transaction_ids = {
+        row.get("transactionId")
+        for row in transactions
+        if row.get("transactionId") and row.get("transactionId") != "(not set)"
+    }
+    missing_transaction_ids = sum(
+        1 for row in transactions if not row.get("transactionId") or row.get("transactionId") == "(not set)"
+    )
+    tolerance = 0.01
+    purchase_counts_match = (
+        purchase["eventCount"]
+        == purchase["keyEvents"]
+        == purchase["ecommercePurchases"]
+        == purchase["transactions"]
+        == len(transaction_ids)
+    )
+    purchase_revenue_matches = (
+        abs(purchase["purchaseRevenue"] - purchase["totalRevenue"]) <= tolerance
+        and abs(purchase["purchaseRevenue"] - transaction_revenue) <= tolerance
+    )
+    item_revenue_matches = abs(purchase["purchaseRevenue"] - item_revenue) <= tolerance
+    return {
+        "current_rows": current_rows,
+        "previous_rows": previous_rows,
+        "transactions": transactions,
+        "configured": configured,
+        "purchase": purchase,
+        "transaction_revenue": transaction_revenue,
+        "item_revenue": item_revenue,
+        "unique_transaction_ids": len(transaction_ids),
+        "missing_transaction_ids": missing_transaction_ids,
+        "purchase_counts_match": purchase_counts_match,
+        "purchase_revenue_matches": purchase_revenue_matches,
+        "item_revenue_matches": item_revenue_matches,
+        "available": bool(rows(data, "key_events_current") or rows(data, "key_events_previous")),
+    }
+
+
 def rel(path, out_dir):
     return path.relative_to(out_dir).as_posix()
 
@@ -337,52 +398,136 @@ def build_outputs(data, out_dir, report_date):
 def build_html(data, charts, out_dir, report_date):
     cur, prev = summary(data, "summary_current"), summary(data, "summary_previous")
     current, previous = data["dateRanges"]["current"], data["dateRanges"]["previous"]
+    reconciliation = build_key_event_reconciliation(data)
     paid_rows = [
         r for r in rows(data, "landing_channel_current")
         if ("Paid" in r.get("sessionDefaultChannelGroup", "") or "Cross-network" in r.get("sessionDefaultChannelGroup", ""))
         and r.get("sessions", 0) >= 3 and r.get("totalRevenue", 0) == 0
     ][:5]
     campaign_rows = [r for r in rows(data, "campaign_current") if r.get("sessionSourceMedium") == "google / cpc"][:8]
+    current_key_event_total = sum(key_events_value(row) for row in reconciliation["current_rows"])
+    previous_key_event_total = sum(key_events_value(row) for row in reconciliation["previous_rows"])
+    current_key_event_names = ", ".join(
+        f"{row.get('eventName', '(not set)')} {fmt_num(key_events_value(row))}"
+        for row in reconciliation["current_rows"]
+    ) or "无"
+    previous_key_event_names = ", ".join(
+        f"{row.get('eventName', '(not set)')} {fmt_num(key_events_value(row))}"
+        for row in reconciliation["previous_rows"]
+    ) or "无"
+    configured_names = ", ".join(row.get("eventName", "(not set)") for row in reconciliation["configured"]) or "Admin API 未返回可用配置"
+    purchase = reconciliation["purchase"]
+    if reconciliation["available"]:
+        key_event_statement = (
+            f"本周 {fmt_num(current_key_event_total)} 次 key events：{html.escape(current_key_event_names)}；"
+            f"对比期 {fmt_num(previous_key_event_total)} 次：{html.escape(previous_key_event_names)}。"
+        )
+    else:
+        key_event_statement = "事件级 key-event 查询不可用，不能把汇总 key events 直接解释为订单。"
+    if purchase["ecommercePurchases"]:
+        count_status = "一致" if reconciliation["purchase_counts_match"] else "不一致，需立即排查重复或缺失 transaction_id"
+        revenue_status = "一致" if reconciliation["purchase_revenue_matches"] else "不一致，需核对 purchase value、退款和重复上报"
+        item_status = (
+            "与 purchaseRevenue 一致"
+            if reconciliation["item_revenue_matches"]
+            else "与 purchaseRevenue 不同；先核对税费、运费、退款和 item 参数"
+        )
+        reconciliation_statement = (
+            f"Purchase event、key events、ecommerce purchases、transactions 与唯一 transaction ID 数量{count_status}；"
+            f"purchaseRevenue、totalRevenue 与交易明细合计{revenue_status}；itemRevenue {item_status}。"
+        )
+    else:
+        reconciliation_statement = "本周未观测到 purchase；非收入 key event 只能作为微转化，不能解释为订单。"
     css = """
 body{margin:0;background:#fbfcfd;color:#1f2430;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Arial Unicode MS",sans-serif}main{max-width:1120px;margin:0 auto;padding:44px 28px 72px}h1{font-size:34px;margin:0 0 10px}h2{font-size:23px;margin:38px 0 12px}h3{font-size:18px;margin:24px 0 10px}p,li{font-size:16px;line-height:1.72}.meta{color:#667085;font-size:14px;margin-bottom:22px}.summary{border-left:5px solid #cc6f47;padding:8px 0 8px 18px;background:#fff}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0 30px}.card{background:#fff;border:1px solid #e6e8f0;border-radius:8px;padding:16px}.label{color:#667085;font-size:13px;margin-bottom:6px}.value{font-size:26px;font-weight:700}.delta{color:#667085;font-size:13px;margin-top:4px}.chart{background:#fff;border:1px solid #e6e8f0;border-radius:8px;padding:12px;margin:14px 0 24px}.chart img{display:block;width:100%;height:auto;border-radius:4px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e6e8f0}th,td{border-bottom:1px solid #e6e8f0;padding:11px 12px;text-align:left;font-size:14px;vertical-align:top}th{color:#667085;background:#f4f6f8}.action{background:#fff;border-left:5px solid #5477c4;padding:12px 18px;margin:12px 0}@media(max-width:780px){main{padding:28px 16px 56px}.cards{grid-template-columns:1fr 1fr}h1{font-size:28px}}
 """
-    campaign_table = "\n".join(f"<tr><td>{html.escape(r.get('sessionCampaignName',''))}</td><td>{r.get('sessions',0)}</td><td>{fmt_pct(r.get('engagementRate',0))}</td><td>{r.get('conversions',0)}</td><td>{fmt_money(r.get('totalRevenue',0))}</td></tr>" for r in campaign_rows)
+    campaign_table = "\n".join(f"<tr><td>{html.escape(r.get('sessionCampaignName',''))}</td><td>{r.get('sessions',0)}</td><td>{fmt_pct(r.get('engagementRate',0))}</td><td>{fmt_num(key_events_value(r))}</td><td>{fmt_money(r.get('totalRevenue',0))}</td></tr>" for r in campaign_rows)
     paid_table = "\n".join(f"<tr><td>{html.escape(r.get('sessionDefaultChannelGroup',''))}</td><td>{html.escape(r.get('landingPagePlusQueryString','').split('?')[0])}</td><td>{r.get('sessions',0)}</td><td>{fmt_pct(r.get('engagementRate',0))}</td><td>{fmt_money(r.get('totalRevenue',0))}</td></tr>" for r in paid_rows)
+    key_event_table = "\n".join(
+        f"<tr><td>{period}</td><td>{html.escape(row.get('eventName', '(not set)'))}</td>"
+        f"<td>{fmt_num(key_events_value(row))}</td><td>{fmt_num(row.get('eventCount', 0))}</td>"
+        f"<td>{fmt_money(row.get('eventValue', 0))}</td><td>{fmt_money(row.get('purchaseRevenue', 0))}</td>"
+        f"<td>{'订单' if row.get('eventName') == 'purchase' else '非收入微转化' if not row.get('purchaseRevenue', 0) else '收入事件'}</td></tr>"
+        for period, event_rows in [("本周", reconciliation["current_rows"]), ("对比期", reconciliation["previous_rows"])]
+        for row in event_rows
+    ) or '<tr><td colspan="7">事件级 key-event 数据不可用</td></tr>'
+    transaction_table = "\n".join(
+        f"<tr><td>{html.escape(row.get('date', ''))}</td><td>{html.escape(row.get('transactionId', '(not set)'))}</td>"
+        f"<td>{html.escape(row.get('deviceCategory', ''))}</td><td>{html.escape(row.get('sessionDefaultChannelGroup', ''))}</td>"
+        f"<td>{html.escape(row.get('sessionSourceMedium', ''))}</td><td>{fmt_money(row.get('purchaseRevenue', 0))}</td></tr>"
+        for row in reconciliation["transactions"][:20]
+    ) or '<tr><td colspan="6">本周无 purchase 交易明细</td></tr>'
     return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GA4 每周增长诊断老板版</title><style>{css}</style></head><body><main>
 <h1>GA4 每周增长诊断老板版</h1>
 <div class="meta">Property {html.escape(str(data.get('propertyId','')))} · 本周 {current['startDate']} 至 {current['endDate']} · 对比 {previous['startDate']} 至 {previous['endDate']} · 站点时区 {html.escape(data.get('propertyTimeZone',''))}</div>
 <h2>Executive Summary</h2>
 <div class="summary">
 <p><strong>本周先看增长质量，不只看总量。</strong> Sessions 从 {fmt_num(prev.get('sessions',0))} 到 {fmt_num(cur.get('sessions',0))}；Revenue 从 {fmt_money(prev.get('totalRevenue',0))} 到 {fmt_money(cur.get('totalRevenue',0))}。如果参与度或收入归因不同步，要先排查链路。</p>
-<p><strong>归因、付费落地页、mobile checkout 是默认优先检查项。</strong> 尤其关注 Direct 是否吃掉广告或 SEO 成交、Paid 页面是否有量无收入、mobile 是否进入 checkout 但没有 purchase。</p>
+<p><strong>Key event 已按事件名和订单明细拆解。</strong> {key_event_statement} {reconciliation_statement}</p>
 </div>
 <div class="cards">
 <div class="card"><div class="label">Sessions</div><div class="value">{fmt_num(cur.get('sessions',0))}</div><div class="delta">上周 {fmt_num(prev.get('sessions',0))}</div></div>
 <div class="card"><div class="label">Revenue</div><div class="value">{fmt_money(cur.get('totalRevenue',0))}</div><div class="delta">上周 {fmt_money(prev.get('totalRevenue',0))}</div></div>
 <div class="card"><div class="label">Engagement rate</div><div class="value">{fmt_pct(cur.get('engagementRate',0))}</div><div class="delta">上周 {fmt_pct(prev.get('engagementRate',0))}</div></div>
-<div class="card"><div class="label">Conversions</div><div class="value">{fmt_num(cur.get('conversions',0))}</div><div class="delta">需区分 purchase 与非收入 key event</div></div>
+<div class="card"><div class="label">Key events</div><div class="value">{fmt_num(key_events_value(cur))}</div><div class="delta">其中 purchase {fmt_num(purchase['ecommercePurchases'])}</div></div>
 </div>
 <h2>增长趋势与核心指标</h2><p><strong>先判断放量是否伴随收入。</strong> 趋势图用于识别流量峰值和成交日是否同步。</p><div class="chart"><img src="{rel(charts['daily'], out_dir)}" alt="每日会话趋势"></div><div class="chart"><img src="{rel(charts['movement'], out_dir)}" alt="核心指标周环比"></div>
 <h2>渠道归因是否可信</h2><p><strong>同时看 sessions 和 revenue。</strong> 如果 Direct 收入异常集中而 paid/organic 有量无收入，应先排查归因和 checkout 跳转。</p><div class="chart"><img src="{rel(charts['channel'], out_dir)}" alt="渠道会话与收入"></div>
-<h3>Google CPC Campaign</h3><table><thead><tr><th>Campaign</th><th>Sessions</th><th>Engagement rate</th><th>Conversions</th><th>Revenue</th></tr></thead><tbody>{campaign_table}</tbody></table>
+<h3>Key event 与订单收入核验</h3><p><strong>{key_event_statement}</strong> 配置中的 key events：{html.escape(configured_names)}。eventValue 是事件参数 value 的合计，不等于营业收入；订单判断以 purchase、transactionId 和 purchaseRevenue 为准。</p><table><thead><tr><th>周期</th><th>Event name</th><th>Key events</th><th>Event count</th><th>Event value</th><th>Purchase revenue</th><th>口径</th></tr></thead><tbody>{key_event_table}</tbody></table>
+<h3>本周 Purchase 交易明细</h3><p><strong>{reconciliation_statement}</strong> 唯一 transaction ID {fmt_num(reconciliation['unique_transaction_ids'])} 个，缺失 transaction ID {fmt_num(reconciliation['missing_transaction_ids'])} 条；交易明细收入 {fmt_money(reconciliation['transaction_revenue'])}，商品收入 {fmt_money(reconciliation['item_revenue'])}。</p><table><thead><tr><th>Date</th><th>Transaction ID</th><th>Device</th><th>Channel</th><th>Source / medium</th><th>Purchase revenue</th></tr></thead><tbody>{transaction_table}</tbody></table>
+<h3>Google CPC Campaign</h3><table><thead><tr><th>Campaign</th><th>Sessions</th><th>Engagement rate</th><th>Key events</th><th>Revenue</th></tr></thead><tbody>{campaign_table}</tbody></table>
 <h2>付费落地页复盘</h2><p><strong>高 sessions 但 0 revenue 的 paid 页面优先复盘。</strong> 这类页面最容易消耗预算但不能证明购买承接。</p><div class="chart"><img src="{rel(charts['paid_landing'], out_dir)}" alt="付费落地页 0 收入"></div><table><thead><tr><th>Channel</th><th>Landing page</th><th>Sessions</th><th>ER</th><th>Revenue</th></tr></thead><tbody>{paid_table}</tbody></table>
 <h2>Mobile vs Desktop 漏斗</h2><p><strong>Mobile 进入 checkout 但没有 purchase 时，先做移动端下单 QA。</strong> 这通常比泛泛改 PDP 更直接。</p><div class="chart"><img src="{rel(charts['device'], out_dir)}" alt="设备漏斗"></div>
 <h2>商品漏斗与 SEO 机会</h2><p><strong>商品图看高浏览低加购 SKU，SEO 图看有需求但未变现的来源。</strong> 这两块决定本周 CRO 和内容承接动作。</p><div class="chart"><img src="{rel(charts['items'], out_dir)}" alt="商品漏斗"></div><div class="chart"><img src="{rel(charts['seo'], out_dir)}" alt="SEO 和 Referral 机会"></div>
 <h2>本周优先动作</h2><div class="action"><strong>1. 修归因再调预算。</strong> 检查 auto-tagging、gclid 保留、跨域、支付跳转和 key event 设置。</div><div class="action"><strong>2. 复测 mobile checkout。</strong> 覆盖购物车、折扣、运费、地址校验和支付方式。</div><div class="action"><strong>3. 收紧付费落地页。</strong> 优先复盘 paid 集合页和主推 SKU 页。</div><div class="action"><strong>4. 统一 campaign 命名。</strong> 保证下周能稳定比较主题、品类、品牌词和 SKU 组。</div>
-<h2>进一步问题与口径限制</h2><p>如果 conversions 有但 revenue 为 0，需要补查 eventName x conversions。若 AI/社区来源没有样本，应表述为 GA4 本周未观测到可分析会话，而不是渠道没有机会。</p>
+<h2>进一步问题与口径限制</h2><p>Core Data API 不能稳定提供 transactionId × itemName 的一对一关联；itemRevenue 与 purchaseRevenue 不一致时，先核对税费、运费、退款和 item 参数，若要精确到每笔订单的 SKU，使用 GA4 BigQuery Export。若 AI/社区来源没有样本，应表述为 GA4 本周未观测到可分析会话，而不是渠道没有机会。</p>
 </main></body></html>"""
 
 
 def build_markdown(data, charts, out_dir):
     current, previous = data["dateRanges"]["current"], data["dateRanges"]["previous"]
+    cur, prev = summary(data, "summary_current"), summary(data, "summary_previous")
+    reconciliation = build_key_event_reconciliation(data)
+    event_lines = []
+    for period, event_rows in [("本周", reconciliation["current_rows"]), ("对比期", reconciliation["previous_rows"])]:
+        for row in event_rows:
+            event_lines.append(
+                f"| {period} | {row.get('eventName', '(not set)')} | {fmt_num(key_events_value(row))} | "
+                f"{fmt_num(row.get('eventCount', 0))} | {fmt_money(row.get('eventValue', 0))} | "
+                f"{fmt_money(row.get('purchaseRevenue', 0))} |"
+            )
+    if not event_lines:
+        event_lines.append("| - | 事件级数据不可用 | 0 | 0 | $0.00 | $0.00 |")
+    transaction_lines = [
+        f"| {row.get('date', '')} | {row.get('transactionId', '(not set)')} | {row.get('deviceCategory', '')} | "
+        f"{row.get('sessionDefaultChannelGroup', '')} | {row.get('sessionSourceMedium', '')} | {fmt_money(row.get('purchaseRevenue', 0))} |"
+        for row in reconciliation["transactions"][:20]
+    ]
+    if not transaction_lines:
+        transaction_lines.append("| - | 本周无 purchase | - | - | - | $0.00 |")
+    configured_names = ", ".join(row.get("eventName", "(not set)") for row in reconciliation["configured"]) or "Admin API 未返回可用配置"
     return f"""# GA4 每周增长诊断老板版
 
 本周范围：`{current['startDate']}` 至 `{current['endDate']}`；对比范围：`{previous['startDate']}` 至 `{previous['endDate']}`。
 
 ## Executive Summary
 
-- **先看增长质量，不只看总量。** 同时检查 sessions、revenue、engagement rate、Direct 归因和 mobile checkout。
-- **默认输出老板版 HTML。** 图表是证据，不是装饰；每张图都要对应一个判断和动作。
+- **本周增长结果。** Sessions `{fmt_num(cur.get('sessions', 0))}`，上期 `{fmt_num(prev.get('sessions', 0))}`；Revenue `{fmt_money(cur.get('totalRevenue', 0))}`，上期 `{fmt_money(prev.get('totalRevenue', 0))}`。
+- **Key event 已拆解。** 本周 `{fmt_num(key_events_value(cur))}` 次 key events，其中 purchase `{fmt_num(reconciliation['purchase']['ecommercePurchases'])}`；不能再把非收入微转化解释为订单。
+
+## Key event 与订单收入核验
+
+当前配置：{configured_names}
+
+| 周期 | Event name | Key events | Event count | Event value | Purchase revenue |
+|---|---|---:|---:|---:|---:|
+{chr(10).join(event_lines)}
+
+| Date | Transaction ID | Device | Channel | Source / medium | Purchase revenue |
+|---|---|---|---|---|---:|
+{chr(10).join(transaction_lines)}
+
+交易明细收入 `{fmt_money(reconciliation['transaction_revenue'])}`；商品收入 `{fmt_money(reconciliation['item_revenue'])}`。Core Data API 无法稳定提供 `transactionId × itemName` 一对一关联，精确订单商品核验需使用 GA4 BigQuery Export。
 
 ## 图表
 
