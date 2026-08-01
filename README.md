@@ -59,3 +59,13 @@ python3 scripts/build_boss_report.py \
 ```
 
 If your default Python does not include `PIL/Pillow`, use the Codex bundled Python runtime when available.
+
+## 关注公众号
+
+如果这个 Skill 对你有帮助，欢迎关注微信公众号 **虎皮叔叔聊跨境独立站**，获取更多独立站增长、数据分析与 AI 营销实操内容。
+
+<p align="center">
+  <img src="assets/wechat-qr.png" alt="虎皮叔叔聊跨境独立站公众号二维码" width="900">
+</p>
+
+<p align="center">微信扫码关注「虎皮叔叔聊跨境独立站」</p>
