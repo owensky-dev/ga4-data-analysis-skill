@@ -40,6 +40,16 @@ Use this reference when the report must match the boss-ready weekly format.
 - Compare aggregate `itemRevenue` separately. Explain legitimate differences from purchase revenue through tax, shipping, and refunds before declaring a tracking fault.
 - Do not promise an exact `transactionId x itemName` join from the Core Data API. Require GA4 BigQuery Export when order-to-SKU mapping is needed.
 
+## BigQuery and Shopify contract
+
+- Probe `analytics_<property-id>` before report generation when a Google Cloud project is supplied.
+- Ignore dataset IDs beginning with `_`; BigQuery can create temporary query-result datasets that are not GA4 exports.
+- Report these states separately: `waiting_for_dataset`, `needs_data_viewer`, `waiting_for_tables`, `ready`, and `query_permission_error`.
+- Keep query execution permission at project scope and data viewing permission at the GA4 dataset scope.
+- A `ready` probe confirms readable tables, not complete date coverage. List the available event tables before claiming full reconciliation.
+- Accept Shopify reconciliation only when its `dateRange.current` exactly matches the GA4 current range. Exclude stale files and name the missing coverage.
+- When both sources cover the report window, reconcile transaction ID to item/SKU, tax, shipping, refunds, and channel attribution. Otherwise state the precise gap.
+
 ## Executive report rules
 
 - Open with `Executive Summary`.

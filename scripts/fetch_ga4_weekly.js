@@ -19,7 +19,7 @@ const args = parseArgs(process.argv.slice(2));
 const propertyId = args["property-id"];
 const keyFile = args["key-file"];
 const outPath = args.out || "ga4_weekly_diagnosis_latest.json";
-const propertyTimeZone = args.timezone || "America/Juneau";
+let propertyTimeZone = args.timezone || null;
 let key;
 
 function b64url(input) {
@@ -70,6 +70,17 @@ async function getAccessToken() {
   const json = JSON.parse(resp.body || "{}");
   if (!json.access_token) throw new Error(`Token failed ${resp.status}: ${resp.body}`);
   return json.access_token;
+}
+
+async function getPropertyTimeZone(accessToken) {
+  const resp = await request(
+    "GET",
+    `https://analyticsadmin.googleapis.com/v1beta/properties/${propertyId}`,
+    { Authorization: `Bearer ${accessToken}` }
+  );
+  if (resp.status !== 200) return "UTC";
+  const json = JSON.parse(resp.body || "{}");
+  return json.timeZone || "UTC";
 }
 
 function ymdInTz(date, timeZone) {
@@ -265,6 +276,7 @@ async function main() {
   }
   key = JSON.parse(fs.readFileSync(keyFile, "utf8"));
   const accessToken = await getAccessToken();
+  propertyTimeZone = propertyTimeZone || await getPropertyTimeZone(accessToken);
   const dateRanges = getDateRanges();
   const results = {};
   for (const [name, dimensions, metrics, body] of requestDefs(dateRanges)) {
