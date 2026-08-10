@@ -15,6 +15,8 @@ This Codex skill turns Google Analytics 4 Data API access into a weekly ecommerc
 - 漏斗事件保留 `date × deviceCategory × eventName` 粒度，周报展示周汇总，JSON 可继续审计每日加购和结账变化。
 - Key event 贡献拆解：使用 `eventName × keyEvents × purchaseRevenue` 区分订单与非收入微转化，并读取当前配置的 key events。
 - Purchase 完整性核验：按 `transactionId`、设备、渠道、source/medium 对账 `ecommercePurchases`、`transactions`、`purchaseRevenue`、`totalRevenue` 和聚合 `itemRevenue`。
+- BigQuery Export 就绪探测：区分数据集未生成、缺少数据集级 Data Viewer、等待事件表和可读取状态，并忽略以下划线开头的临时数据集。
+- 可选 Shopify 订单真值核验：仅接受与本期 GA4 日期窗口完全一致的对账文件，避免旧订单数据冒充本期结果。
 - 商品漏斗分析，覆盖 `itemName`、`itemsViewed`、`itemsAddedToCart`、`itemsPurchased`、`itemRevenue`。
 - SEO、内容页、Referral、AI 来源机会分析。
 
@@ -25,6 +27,7 @@ This Codex skill turns Google Analytics 4 Data API access into a weekly ecommerc
 - `ga4_weekly_boss_report_<date>.md`: editable Markdown backup.
 - `ga4_boss_report_chart_map_<date>.json`: chart map and evidence notes.
 - `ga4_boss_report_assets_<date>/`: static PNG chart assets.
+- `ga4_bigquery_probe_latest.json`: optional BigQuery Export readiness snapshot.
 
 ## Usage
 
@@ -44,7 +47,7 @@ Fetch weekly GA4 data:
 
 ```bash
 node scripts/fetch_ga4_weekly.js \
-  --property-id 525007868 \
+  --property-id 123456789 \
   --key-file /path/to/service-account.json \
   --out work/ga4_weekly_diagnosis_latest.json
 ```
@@ -55,8 +58,23 @@ Build the executive report:
 python3 scripts/build_boss_report.py \
   --input work/ga4_weekly_diagnosis_latest.json \
   --out-dir work \
-  --report-date 2026-06-30
+  --report-date 2026-06-30 \
+  --bigquery-probe work/ga4_bigquery_probe_latest.json \
+  --shopify-reconciliation work/ga4_shopify_order_reconciliation_latest.json \
+  --site-domain example.com
 ```
+
+Probe BigQuery Export before report generation when a Google Cloud project is available:
+
+```bash
+node scripts/probe_bigquery_export.js \
+  --property-id 123456789 \
+  --project-id example-project \
+  --key-file /path/to/service-account.json \
+  --out work/ga4_bigquery_probe_latest.json
+```
+
+The report reconciliation flags are optional. Do not pass a Shopify file from a different GA4 date window.
 
 If your default Python does not include `PIL/Pillow`, use the Codex bundled Python runtime when available.
 

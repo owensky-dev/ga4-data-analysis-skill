@@ -1,6 +1,6 @@
 ---
 name: ga4-data-analysis
-description: GA4 Data API weekly growth diagnosis and executive reporting for ecommerce or DTC sites. Use when Codex needs to read a GA4 property with a service-account key, compare the most recent complete 7 days against the prior 7 days, diagnose attribution/channel/landing-page/device/item/SEO issues, and produce a Chinese boss-ready HTML report with static PNG charts, Markdown backup, and auditable JSON outputs.
+description: GA4 Data API weekly growth diagnosis and executive reporting for ecommerce or DTC sites. Use when Codex needs to read a GA4 property with a service-account key, compare the most recent complete 7 days against the prior 7 days, diagnose attribution/channel/landing-page/device/item/SEO issues, check GA4 BigQuery Export readiness, reconcile optional Shopify order truth, and produce a Chinese boss-ready HTML report with static PNG charts, Markdown backup, and auditable JSON outputs.
 ---
 
 # GA4 数据分析
@@ -20,20 +20,25 @@ Prefer this skill when the user asks for GA4 周报、GA4 增长诊断、独立�
    - Report language, default Chinese.
    - Time window, default latest complete 7 days in the GA4 property timezone vs the previous 7 days.
 2. Read automation or project memory if the request is recurring or references a previous report. Preserve the last accepted report format unless the user asks to change it.
-3. Fetch GA4 data with `scripts/fetch_ga4_weekly.js`.
+3. When a Google Cloud project ID is available, probe GA4 BigQuery Export with `scripts/probe_bigquery_export.js` before building the report.
+   - Ignore underscore-prefixed temporary query-result datasets.
+   - Distinguish a missing dataset, missing dataset-level Data Viewer permission, an empty dataset waiting for event tables, and a ready export.
+   - Keep `BigQuery Job User` at project scope and grant `BigQuery Data Viewer` only on the GA4 export dataset when required.
+4. Fetch GA4 data with `scripts/fetch_ga4_weekly.js`.
    - Keep Sessions/channel queries separate from ecommerce event queries.
    - Query `keyEvents`, not `conversions`. GA4 treats them as duplicate metric aliases and rejects a request containing both. Keep a derived `conversions` field only for backward compatibility with older renderers.
    - Fetch `view_item`, `add_to_cart`, `begin_checkout`, and `purchase` with `date`, `deviceCategory`, and `eventName`, then aggregate the dated rows only when rendering the weekly device funnel.
    - Fetch key-event contribution by `eventName` and `isKeyEvent` with `eventCount`, `keyEvents`, `eventValue`, `purchaseRevenue`, `totalRevenue`, `ecommercePurchases`, and `transactions` for both periods.
    - Fetch purchase detail by `date`, `transactionId`, `deviceCategory`, `sessionDefaultChannelGroup`, and `sessionSourceMedium`. Also list configured key events through the GA4 Admin API when access permits.
-4. Build the executive report with `scripts/build_boss_report.py`.
-5. Validate:
+5. Build the executive report with `scripts/build_boss_report.py`. Pass the optional BigQuery probe and Shopify reconciliation paths only when those artifacts exist for the current run.
+6. Validate:
    - No failed GA4 queries unless explicitly documented.
    - HTML exists and every `<img>` path resolves.
    - PNG charts are non-empty and have readable dimensions.
    - Report names the date ranges and source caveats.
    - Key-event totals are explained by event name; purchase count and revenue are reconciled against transaction and item datasets.
-6. Hand off the HTML report path first, then the Markdown backup, JSON snapshot, chart map, and chart asset folder.
+   - Never reuse a Shopify reconciliation file whose current date range differs from the GA4 report window.
+7. Hand off the HTML report path first, then the Markdown backup, JSON snapshot, chart map, and chart asset folder.
 
 ## Required Diagnostic Coverage
 
@@ -42,6 +47,7 @@ Cover these sections unless the data is unavailable:
 - Most important new or changed signal this week.
 - Data health and attribution issues: `Unassigned`, `(not set)`, abnormal `Direct`, conversions with zero revenue, UTM gaps or naming inconsistency, self-referrals such as Shopify admin.
 - Key-event and purchase integrity: configured key events, `eventName` contribution, unique `transactionId`, `ecommercePurchases`, `transactions`, `purchaseRevenue`, `totalRevenue`, and aggregate `itemRevenue` reconciliation.
+- BigQuery Export and order truth: probe the expected `analytics_<property-id>` dataset, report its permission/table status, and use current-window Shopify reconciliation only when supplied. Never present stale order data as current truth.
 - Channel efficiency by channel, source/medium, and campaign: sessions, engagement rate, conversions, revenue, revenue per session.
 - Paid landing pages: high-traffic or low-conversion paid pages with zero revenue.
 - Mobile vs desktop funnel: `view_item`, `add_to_cart`, `begin_checkout`, `purchase`; call out mobile CRO issues.
@@ -79,14 +85,14 @@ Use:
 
 ```bash
 node scripts/fetch_ga4_weekly.js \
-  --property-id 525007868 \
+  --property-id 123456789 \
   --key-file /path/to/service-account.json \
   --out work/ga4_weekly_diagnosis_latest.json
 ```
 
 Optional flags:
 
-- `--timezone America/Juneau` to override the property timezone assumption.
+- `--timezone America/New_York` to override the timezone returned by the GA4 Admin API.
 - `--current-start YYYY-MM-DD --current-end YYYY-MM-DD` to force a date range.
 - `--previous-start YYYY-MM-DD --previous-end YYYY-MM-DD` to force the comparison range.
 
@@ -102,14 +108,29 @@ Use:
 python3 scripts/build_boss_report.py \
   --input work/ga4_weekly_diagnosis_latest.json \
   --out-dir work \
-  --report-date 2026-06-30
+  --report-date 2026-06-30 \
+  --bigquery-probe work/ga4_bigquery_probe_latest.json \
+  --shopify-reconciliation work/ga4_shopify_order_reconciliation_latest.json \
+  --site-domain example.com
 ```
 
-Prefer a Python runtime with `PIL/Pillow`. If `PIL` is unavailable, use the Codex bundled Python when present:
+The last three flags are optional. Omit `--report-date` to derive it from the GA4 snapshot generation time. Omit either reconciliation flag when that source was not read in the current run.
+
+### Probe BigQuery Export
+
+Use:
 
 ```bash
-/Users/linheping/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 scripts/build_boss_report.py ...
+node scripts/probe_bigquery_export.js \
+  --property-id 123456789 \
+  --project-id example-project \
+  --key-file /path/to/service-account.json \
+  --out work/ga4_bigquery_probe_latest.json
 ```
+
+Treat `needs_data_viewer` as a dataset-level permission gap. Do not solve it by granting project-wide Data Viewer. A `ready` result means event tables are readable; it does not prove that every date required by the report has already arrived.
+
+Prefer a Python runtime with `PIL/Pillow`. If `PIL` is unavailable, use another available Python runtime that includes Pillow.
 
 ## Validation Commands
 
@@ -132,6 +153,8 @@ Then inspect the script output. It prints generated file paths and validates HTM
 - If all revenue lands in `Direct`, flag possible attribution loss before making budget recommendations.
 - If mobile has `begin_checkout` but no `purchase`, prioritize mobile checkout QA over broad page redesign.
 - If AI or community sources have no visible sample, state that GA4 did not observe usable sessions rather than claiming the channel has no opportunity.
+- If BigQuery is ready but a required daily table is missing, state the actual table coverage and defer full transaction-to-item reconciliation.
+- Exclude Shopify reconciliation from the report when its `dateRange.current` does not exactly match the GA4 current window.
 
 ## Publishing Notes
 

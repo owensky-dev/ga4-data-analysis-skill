@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,7 +10,13 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from build_boss_report import aggregate_device_funnel, build_key_event_reconciliation
+import build_boss_report
+from build_boss_report import (
+    aggregate_device_funnel,
+    bigquery_status_from_probe,
+    build_key_event_reconciliation,
+    paid_channel_diagnosis,
+)
 
 
 class DeviceFunnelTests(unittest.TestCase):
@@ -113,6 +121,79 @@ class KeyEventReconciliationTests(unittest.TestCase):
 
         self.assertFalse(result["purchase_counts_match"])
         self.assertEqual(result["missing_transaction_ids"], 1)
+
+
+class ExternalReconciliationTests(unittest.TestCase):
+    def test_ready_bigquery_probe_reports_readable_tables(self) -> None:
+        result = bigquery_status_from_probe(
+            {
+                "propertyId": "123",
+                "projectId": "example-project",
+                "expectedDatasetId": "analytics_123",
+                "status": "ready",
+                "jobQuery": {"httpStatus": 200},
+                "adminLinks": {"count": 1},
+                "expectedDataset": {"tableIds": ["events_20260801", "events_20260802"]},
+            },
+            {},
+        )
+
+        self.assertIn("analytics_123 已可读取", result["datasetProbe"])
+        self.assertIn("2 张表", result["datasetProbe"])
+        self.assertIn("transaction-to-item", result["recommendedAccess"][0])
+
+    def test_stale_shopify_window_is_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reconciliation_path = Path(temp_dir) / "shopify.json"
+            reconciliation_path.write_text(
+                json.dumps(
+                    {
+                        "dateRange": {
+                            "current": {"startDate": "2026-07-01", "endDate": "2026-07-07"}
+                        },
+                        "summary": {"shopifyMatchedOrders": 9},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            previous_shopify = build_boss_report.SHOPIFY_RECON_PATH
+            previous_probe = build_boss_report.BIGQUERY_PROBE_PATH
+            try:
+                build_boss_report.SHOPIFY_RECON_PATH = reconciliation_path
+                build_boss_report.BIGQUERY_PROBE_PATH = None
+                result = build_boss_report.load_shopify_reconciliation(
+                    {
+                        "dateRanges": {
+                            "current": {"startDate": "2026-07-08", "endDate": "2026-07-14"}
+                        }
+                    }
+                )
+            finally:
+                build_boss_report.SHOPIFY_RECON_PATH = previous_shopify
+                build_boss_report.BIGQUERY_PROBE_PATH = previous_probe
+
+        self.assertTrue(result["staleShopifyReconciliation"])
+        self.assertNotIn("summary", result)
+
+    def test_paid_diagnosis_does_not_claim_zero_revenue_when_revenue_exists(self) -> None:
+        result = paid_channel_diagnosis(
+            {
+                "results": {
+                    "channel_current": {
+                        "rows": [
+                            {
+                                "sessionDefaultChannelGroup": "Paid Search",
+                                "sessions": 20,
+                                "totalRevenue": 200,
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+
+        self.assertNotIn("没有收入", result["title"])
+        self.assertIn("revenue/session", result["title"])
 
 
 if __name__ == "__main__":
