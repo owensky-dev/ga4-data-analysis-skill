@@ -17,6 +17,7 @@ This Codex skill turns Google Analytics 4 Data API access into a weekly ecommerc
 - Purchase 完整性核验：按 `transactionId`、设备、渠道、source/medium 对账 `ecommercePurchases`、`transactions`、`purchaseRevenue`、`totalRevenue` 和聚合 `itemRevenue`。
 - BigQuery Export 就绪探测：区分数据集未生成、缺少数据集级 Data Viewer、等待事件表和可读取状态，并忽略以下划线开头的临时数据集。
 - 可选 Shopify 订单真值核验：仅接受与本期 GA4 日期窗口完全一致的对账文件，避免旧订单数据冒充本期结果。
+- Shopify → GA4 purchase 漏记恢复：先用 BigQuery 排除已有交易并唯一匹配 checkout session，默认只 dry-run；只有明确授权 `--send` 才提交 Measurement Protocol。
 - 商品漏斗分析，覆盖 `itemName`、`itemsViewed`、`itemsAddedToCart`、`itemsPurchased`、`itemRevenue`。
 - SEO、内容页、Referral、AI 来源机会分析。
 
@@ -73,6 +74,20 @@ node scripts/probe_bigquery_export.js \
   --key-file /path/to/service-account.json \
   --out work/ga4_bigquery_probe_latest.json
 ```
+
+Diagnose a paid Shopify order that may be missing from GA4:
+
+```bash
+node scripts/recover_missing_purchases.js \
+  --orders-file /private/path/paid_orders.json \
+  --property-id 123456789 \
+  --project-id example-project \
+  --key-file /private/path/service-account.json \
+  --measurement-id G-XXXXXXXXXX \
+  --ledger work/ga4_purchase_recovery_ledger.json
+```
+
+The command is a dry-run unless `--send` is explicitly supplied. It requires a paid, non-test, non-PII order file, readable GA4 BigQuery Export, one unique checkout-session match, strict debug validation, and both BigQuery plus private-ledger deduplication. Events aged 24–70 hours require the separate `--allow-degraded-attribution` opt-in; events older than 70 hours are rejected. See [`references/purchase-recovery.md`](references/purchase-recovery.md).
 
 The report reconciliation flags are optional. Do not pass a Shopify file from a different GA4 date window.
 
