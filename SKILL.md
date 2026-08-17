@@ -1,6 +1,6 @@
 ---
 name: ga4-data-analysis
-description: GA4 Data API weekly growth diagnosis and executive reporting for ecommerce or DTC sites. Use when Codex needs to read a GA4 property with a service-account key, compare the most recent complete 7 days against the prior 7 days, diagnose attribution/channel/landing-page/device/item/SEO issues, check GA4 BigQuery Export readiness, reconcile optional Shopify order truth, and produce a Chinese boss-ready HTML report with static PNG charts, Markdown backup, and auditable JSON outputs.
+description: GA4 Data API weekly growth diagnosis, Shopify purchase-integrity reconciliation, guarded Measurement Protocol recovery, and executive reporting for ecommerce or DTC sites. Use when Codex needs to compare complete weeks, diagnose attribution/channel/landing-page/device/item/SEO issues, check GA4 BigQuery Export, reconcile Shopify order truth, safely investigate or recover missing GA4 purchase events, or produce a Chinese boss-ready HTML report with static PNG charts and auditable backups.
 ---
 
 # GA4 数据分析
@@ -30,15 +30,20 @@ Prefer this skill when the user asks for GA4 周报、GA4 增长诊断、独立�
    - Fetch `view_item`, `add_to_cart`, `begin_checkout`, and `purchase` with `date`, `deviceCategory`, and `eventName`, then aggregate the dated rows only when rendering the weekly device funnel.
    - Fetch key-event contribution by `eventName` and `isKeyEvent` with `eventCount`, `keyEvents`, `eventValue`, `purchaseRevenue`, `totalRevenue`, `ecommercePurchases`, and `transactions` for both periods.
    - Fetch purchase detail by `date`, `transactionId`, `deviceCategory`, `sessionDefaultChannelGroup`, and `sessionSourceMedium`. Also list configured key events through the GA4 Admin API when access permits.
-5. Build the executive report with `scripts/build_boss_report.py`. Pass the optional BigQuery probe and Shopify reconciliation paths only when those artifacts exist for the current run.
-6. Validate:
+5. When Shopify has a paid order that GA4 may have missed, read [purchase-recovery.md](references/purchase-recovery.md) before acting.
+   - Keep diagnosis read-only by default. Require readable BigQuery events and a current minimal, non-PII Shopify order file.
+   - Run `scripts/recover_missing_purchases.js` without `--send` first. Submit only after an exact `transaction_id` dedupe check, one unique checkout-session match, strict debug validation, and explicit user authorization.
+   - Treat 24–70-hour recovery as degraded attribution requiring a separate opt-in. Never backfill an event older than 70 hours.
+   - Keep both BigQuery `transaction_id` and a private local ledger as dedupe gates. A production HTTP response means submitted; verify later through BigQuery before calling it restored.
+6. Build the executive report with `scripts/build_boss_report.py`. Pass the optional BigQuery probe and Shopify reconciliation paths only when those artifacts exist for the current run.
+7. Validate:
    - No failed GA4 queries unless explicitly documented.
    - HTML exists and every `<img>` path resolves.
    - PNG charts are non-empty and have readable dimensions.
    - Report names the date ranges and source caveats.
    - Key-event totals are explained by event name; purchase count and revenue are reconciled against transaction and item datasets.
    - Never reuse a Shopify reconciliation file whose current date range differs from the GA4 report window.
-7. Hand off the HTML report path first, then the Markdown backup, JSON snapshot, chart map, and chart asset folder.
+8. Hand off the HTML report path first, then the Markdown backup, JSON snapshot, chart map, and chart asset folder.
 
 ## Required Diagnostic Coverage
 
@@ -130,6 +135,12 @@ node scripts/probe_bigquery_export.js \
 
 Treat `needs_data_viewer` as a dataset-level permission gap. Do not solve it by granting project-wide Data Viewer. A `ready` result means event tables are readable; it does not prove that every date required by the report has already arrived.
 
+### Recover a missing purchase
+
+Use `scripts/recover_missing_purchases.js` only after reading [purchase-recovery.md](references/purchase-recovery.md). Dry-run is the default; `--send` is an external write and requires explicit authorization. Load the Measurement Protocol API secret from `GA4_MP_API_SECRET` or macOS Keychain, never from a command-line value or committed file.
+
+The debug endpoint validates payload structure with `ENFORCE_RECOMMENDATIONS`, but it does not validate the API secret. Keep status language precise: `validated_dry_run`, `submitted`, then later `verified` only after GA4/BigQuery read-back.
+
 Prefer a Python runtime with `PIL/Pillow`. If `PIL` is unavailable, use another available Python runtime that includes Pillow.
 
 ## Validation Commands
@@ -155,7 +166,9 @@ Then inspect the script output. It prints generated file paths and validates HTM
 - If AI or community sources have no visible sample, state that GA4 did not observe usable sessions rather than claiming the channel has no opportunity.
 - If BigQuery is ready but a required daily table is missing, state the actual table coverage and defer full transaction-to-item reconciliation.
 - Exclude Shopify reconciliation from the report when its `dateRange.current` does not exactly match the GA4 current window.
+- Do not infer a missing purchase from aggregate counts alone. Require a Shopify paid non-test order, no matching GA4 `transaction_id`, and one uniquely matched BigQuery checkout session.
+- Never enable degraded 24–70-hour attribution or `--send` implicitly. Stop on ambiguous sessions, failed strict validation, an existing transaction, or a private-ledger hit.
 
 ## Publishing Notes
 
-When packaging this skill for GitHub, do not include service-account JSON keys, raw customer exports, or private GA4 output files. The scripts are generic and should accept property IDs and key paths as runtime inputs.
+When packaging this skill for GitHub, do not include service-account JSON keys, Measurement Protocol secrets, raw customer exports, private ledgers, or private GA4 output files. The scripts are generic and accept property IDs and local key paths as runtime inputs.

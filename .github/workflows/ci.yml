@@ -49,6 +49,7 @@ jobs:
         run: |
           node --check scripts/fetch_ga4_weekly.js
           node --check scripts/probe_bigquery_export.js
+          node --check scripts/recover_missing_purchases.js
           node --test scripts/tests/test_*.js
 
       - name: Validate Python report builder
