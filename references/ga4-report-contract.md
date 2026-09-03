@@ -46,9 +46,14 @@ Use this reference when the report must match the boss-ready weekly format.
 - Ignore dataset IDs beginning with `_`; BigQuery can create temporary query-result datasets that are not GA4 exports.
 - Report these states separately: `waiting_for_dataset`, `needs_data_viewer`, `waiting_for_tables`, `ready`, and `query_permission_error`.
 - Keep query execution permission at project scope and data viewing permission at the GA4 dataset scope.
-- A `ready` probe confirms readable tables, not complete date coverage. List the available event tables before claiming full reconciliation.
-- Accept Shopify reconciliation only when its `dateRange.current` exactly matches the GA4 current range. Exclude stale files and name the missing coverage.
-- When both sources cover the report window, reconcile transaction ID to item/SKU, tax, shipping, refunds, and channel attribution. Otherwise state the precise gap.
+- A `ready` probe confirms readable tables, not complete date coverage. Require each `events_YYYYMMDD` table in the report window before publishing any purchase/refund coverage rate.
+- Generate `purchase_reconciliation.json` with `scripts/reconcile_shopify_ga4.js`. Accept it only when `period.start_date/end_date` exactly match the report, `coverage.status = complete`, `reconciliation.publishable = true`, and its Shopify current-paid Online Store count/revenue match the report snapshot.
+- Keep three layers separate: Shopify current-paid business results; purchase capture for the eligible web cohort, including later-refunded orders; and refund-event coverage for Shopify orders that expect refunds.
+- Required exception fields are missing web purchases, GA4-only purchases, duplicate or blank GA4 transaction IDs, Shopify rows without order IDs, and refunds missing from GA4.
+- Required revenue bridge fields are current-paid Online Store revenue, GA4 purchase revenue, Shopify-only current-paid revenue, GA4 revenue not in current-paid web orders, matched-ID value differences, and any unexplained residual.
+- The aggregate count/revenue gap is only an alert. Equal totals do not prove matching IDs, and a small gap can hide offsetting purchase and refund failures.
+- Keep Shop/POS/draft/app/offsite orders outside the web capture denominator while retaining them in business totals.
+- When both sources cover the report window, reconcile transaction ID to item/SKU, tax, shipping, refunds, and channel attribution. Otherwise state the precise gap and suppress the rate.
 
 ## Executive report rules
 
