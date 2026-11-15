@@ -1,6 +1,8 @@
 # GA4 数据分析 / GA4 Data Analysis
 
-[虎皮叔叔 · hupishushu.com](https://hupishushu.com/) · [项目介绍](https://hupishushu.com/projects/ga4-data-analysis-skill/) · [中文使用指南](https://hupishushu.com/skills/ga4-data-analysis/)
+<!-- hupishushu:links:start -->
+[虎皮叔叔 · hupishushu.com](https://hupishushu.com/) · [项目介绍](https://hupishushu.com/projects/ga4-data-analysis-skill/) · [使用指南](https://hupishushu.com/skills/ga4-data-analysis/)
+<!-- hupishushu:links:end -->
 
 [![CI](https://github.com/owensky-dev/ga4-data-analysis-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/owensky-dev/ga4-data-analysis-skill/actions/workflows/ci.yml)
 
